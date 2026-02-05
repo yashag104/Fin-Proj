@@ -263,7 +263,7 @@ def main():
     # Training configuration
     print("\n⚙️  Training configuration:")
     EPOCHS = 150  # Increased for better convergence
-    BATCH_SIZE = 32  # Increased batch size
+    BATCH_SIZE = 128  # Increased batch size for larger dataset
     VALIDATION_SPLIT = 0.1
 
     print(f"  Epochs: {EPOCHS}")
