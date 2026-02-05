@@ -13,16 +13,17 @@ warnings.filterwarnings('ignore')
 class EnhancedBitcoinProcessor:
     """
     Enhanced Bitcoin data processor with PROPER scaling (no data leakage)
-    CUSTOM: Uses btc_1d_data_2018_to_2025.csv with 1500 train / 1444 test split
+    CUSTOM: Uses btc_15m_data_2018_to_2025.csv with 15-minute interval data
     """
 
-    def __init__(self, csv_path='btc_1d_data_2018_to_2025.csv', window_size=60,
-                 train_samples=1500, test_samples=1444):
+    def __init__(self, csv_path='btc_15m_data_2018_to_2025.csv', window_size=60,
+                 train_samples=None, test_samples=None, split_ratio=0.8):
         self.csv_path = csv_path
         self.window_size = window_size
         self.train_samples = train_samples
         self.test_samples = test_samples
-        self.total_samples = train_samples + test_samples
+        self.split_ratio = split_ratio
+        self.total_samples = 0  # Will be set later
 
         # CRITICAL FIX: Separate scalers for features and target
         self.feature_scaler_1min = MinMaxScaler(feature_range=(0, 1))
@@ -197,7 +198,7 @@ class EnhancedBitcoinProcessor:
 
     def resample_to_5min(self, data):
         """
-        Since this is DAILY data (1d), we'll skip resampling
+        Since this is 15-minute data, we'll skip resampling
         and just use the same data for both branches
         """
         print("\n" + "=" * 80)
@@ -206,11 +207,11 @@ class EnhancedBitcoinProcessor:
 
         # Detect current interval
         if len(data) > 1:
-            interval = (data.index[1] - data.index[0]).total_seconds() / 3600 / 24
-            print(f"✓ Current interval: ~{interval:.1f} days")
+            interval = (data.index[1] - data.index[0]).total_seconds() / 60
+            print(f"✓ Current interval: ~{interval:.1f} minutes")
 
-        # For daily data, we'll use the same data for both branches
-        print(f"✓ Using daily data for both branches")
+        # For 15-minute data, we'll use the same data for both branches
+        print(f"✓ Using 15-minute data for both branches")
         print(f"✓ Data shape: {data.shape}")
 
         return data.copy()
@@ -232,14 +233,21 @@ class EnhancedBitcoinProcessor:
         data_5min = data_5min[features + ['Close']].dropna()
 
         print(f"✓ Features used: {features}")
-        print(f"✓ Daily data after dropna: {data_1min.shape}")
+        print(f"✓ 15-minute data after dropna: {data_1min.shape}")
 
         # CRITICAL: Custom split based on entry counts
         # We need to account for window_size when creating samples
         available_samples = len(data_5min) - self.window_size - 1
         print(f"✓ Available samples after windowing: {available_samples}")
 
-        if available_samples < (self.train_samples + self.test_samples):
+        # CRITICAL: Dynamic split based on ratio if no fixed samples provided
+        if self.train_samples is None:
+            self.train_samples = int(available_samples * self.split_ratio)
+            self.test_samples = available_samples - self.train_samples
+            print(f"✓ Dynamic Split ({self.split_ratio*100:.0f}/{ (1-self.split_ratio)*100:.0f}):")
+            print(f"  - Train samples: {self.train_samples}")
+            print(f"  - Test samples: {self.test_samples}")
+        elif available_samples < (self.train_samples + self.test_samples):
             print(f"⚠️  Warning: Not enough data for {self.train_samples + self.test_samples} samples")
             print(f"⚠️  Adjusting to available samples: {available_samples}")
             # Maintain ratio
@@ -254,7 +262,7 @@ class EnhancedBitcoinProcessor:
         data_5min_train = data_5min.iloc[:split_idx]
         data_5min_test = data_5min.iloc[split_idx - self.window_size:]  # Overlap for continuity
 
-        # Split 1-min data (same as 5-min since it's daily data)
+        # Split 1-min data (same as 5-min since it's 15-minute data)
         data_1min_train = data_1min.iloc[:split_idx]
         data_1min_test = data_1min.iloc[split_idx - self.window_size:]
 
@@ -323,10 +331,10 @@ class EnhancedBitcoinProcessor:
         y_direction_list = []
 
         for i in range(self.window_size, len(data_5min_scaled) - 1):
-            # 5-min window (in this case, daily window)
+            # 5-min window (in this case, 15-minute window)
             window_5min = data_5min_scaled.iloc[i - self.window_size:i].values
 
-            # Corresponding 1-min window (same as 5-min for daily data)
+            # Corresponding 1-min window (same as 5-min for 15-minute data)
             window_1min = data_1min_scaled.iloc[i - self.window_size:i].values
 
             # Ensure windows have correct length
@@ -372,7 +380,7 @@ class EnhancedBitcoinProcessor:
         # Technical indicators
         data_1min = self.calculate_technical_indicators(data_1min)
 
-        # Create 5-minute data (for daily, just copy)
+        # Create 5-minute data (for 15-minute data, just copy)
         data_5min = self.resample_to_5min(data_1min)
 
         # Create sliding windows (with custom train-test split)
@@ -389,12 +397,12 @@ def main():
     """Main execution"""
     print("=" * 80)
     print("BITCOIN PRICE PREDICTION - CUSTOM DATA PREPROCESSING")
-    print("File: btc_1d_data_2018_to_2025.csv")
-    print("Split: 1500 train / 1444 test")
+    print("File: btc_15m_data_2018_to_2025.csv")
+    print("15-minute interval data")
     print("=" * 80)
 
     # Check if file exists
-    csv_file = 'btc_1d_data_2018_to_2025.csv'
+    csv_file = 'btc_15m_data_2018_to_2025.csv'
 
     if not os.path.exists(csv_file):
         print(f"\n❌ File not found: {csv_file}")
@@ -403,12 +411,13 @@ def main():
 
     print(f"\n✓ Found file: {csv_file}")
 
-    # Process data with custom split
+    # Process data with dynamic split (80/20)
     processor = EnhancedBitcoinProcessor(
         csv_path=csv_file,
         window_size=60,
-        train_samples=1500,
-        test_samples=1444
+        train_samples=None,  # Use dynamic split
+        test_samples=None,
+        split_ratio=0.8
     )
 
     result = processor.process_pipeline()
